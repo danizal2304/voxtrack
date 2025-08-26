@@ -1,50 +1,45 @@
 import React, { useState } from 'react';
 import { Search, Filter, Play, FileText, AlertCircle, CheckCircle, Star } from 'lucide-react';
+import { useQAScores, ConversationWithQA } from '../../hooks/useQAScores';
 
 const QualityAssurance: React.FC = () => {
   const [selectedConversation, setSelectedConversation] = useState<number | null>(null);
+  const { conversations, loading } = useQAScores();
 
-  const conversations = [
-    {
-      id: 1,
-      date: '2025-01-15 14:30',
-      client: 'TechCorp',
-      agent: 'Sales Assistant',
-      duration: '4:23',
-      score: 87,
-      intent: 'Product Demo Request',
-      urgency: 'Medium',
-      status: 'Completed',
-      risks: ['None'],
-      transcript: 'Usuario: Hola, me gustaría saber más sobre sus servicios...\n\nAgente: ¡Hola! Gracias por contactarnos. Estaré encantado de ayudarte con información sobre nuestros servicios. ¿Podrías contarme un poco más sobre tu empresa y qué tipo de solución estás buscando?\n\nUsuario: Somos una startup de fintech y necesitamos automatizar nuestro servicio al cliente...'
-    },
-    {
-      id: 2,
-      date: '2025-01-15 13:45',
-      client: 'Real Estate Pro',
-      agent: 'Lead Qualifier',
-      duration: '2:15',
-      score: 65,
-      intent: 'Property Inquiry',
-      urgency: 'High',
-      status: 'Escalated',
-      risks: ['Low comprehension', 'Missed escalation'],
-      transcript: 'Usuario: Estoy interesado en comprar una casa en el centro de la ciudad...\n\nAgente: Perfecto, te puedo ayudar con eso. ¿Cuál es tu presupuesto?\n\nUsuario: Tengo hasta 500,000 euros, pero me urge encontrar algo esta semana porque me mudo por trabajo...'
-    },
-    {
-      id: 3,
-      date: '2025-01-15 12:20',
-      client: 'MedClinic',
-      agent: 'Appointment Setter',
-      duration: '3:42',
-      score: 92,
-      intent: 'Appointment Booking',
-      urgency: 'Low',
-      status: 'Completed',
-      risks: ['None'],
-      transcript: 'Usuario: Necesito agendar una cita con el cardiólogo...\n\nAgente: Por supuesto, te puedo ayudar a agendar tu cita con cardiología. Tengo disponibilidad para la próxima semana. ¿Prefieres mañana o tarde?\n\nUsuario: Prefiero por la mañana si es posible...'
-    }
-  ];
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-gray-500">Cargando conversaciones...</div>
+      </div>
+    );
+  }
+
+  // Transform database data for display
+  const conversationData = conversations
+    .filter(conv => conv.qa_score) // Only show conversations with QA scores
+    .map(conv => ({
+      id: conv.id,
+      date: new Date(conv.call_started_at).toLocaleString('es-ES'),
+      client: conv.client_name,
+      agent: conv.agent_id,
+      duration: `${Math.floor(conv.call_duration_seconds / 60)}:${(conv.call_duration_seconds % 60).toString().padStart(2, '0')}`,
+      score: conv.qa_score?.overall_score || 0,
+      intent: conv.qa_score?.conversation_intent || 'Unknown',
+      urgency: conv.qa_score?.urgency_level || 'low',
+      status: conv.call_status,
+      risks: conv.qa_score?.risks_detected || [],
+      transcript: conv.transcript || 'No transcript available',
+      qa_score: conv.qa_score
+    }));
+
+  // Calculate stats from database
+  const totalConversations = conversationData.length;
+  const avgScore = totalConversations > 0 
+    ? conversationData.reduce((sum, conv) => sum + conv.score, 0) / totalConversations 
+    : 0;
+  const riskyConversations = conversationData.filter(conv => 
+    conv.risks.length > 0 && !conv.risks.includes('None')
+  ).length;
 
   const getScoreColor = (score: number) => {
     if (score >= 80) return 'text-green-600';
@@ -60,14 +55,14 @@ const QualityAssurance: React.FC = () => {
 
   const getUrgencyColor = (urgency: string) => {
     switch (urgency) {
-      case 'High': return 'bg-red-100 text-red-700';
-      case 'Medium': return 'bg-yellow-100 text-yellow-700';
-      case 'Low': return 'bg-green-100 text-green-700';
+      case 'high': return 'bg-red-100 text-red-700';
+      case 'medium': return 'bg-yellow-100 text-yellow-700';
+      case 'low': return 'bg-green-100 text-green-700';
       default: return 'bg-gray-100 text-gray-700';
     }
   };
 
-  const selectedConv = conversations.find(c => c.id === selectedConversation);
+  const selectedConv = conversationData.find(c => c.id === selectedConversation);
 
   return (
     <div className="h-full flex">
@@ -96,15 +91,15 @@ const QualityAssurance: React.FC = () => {
           {/* Quick Stats */}
           <div className="grid grid-cols-3 gap-4 mt-4">
             <div className="text-center">
-              <div className="text-lg font-semibold text-gray-900">234</div>
+              <div className="text-lg font-semibold text-gray-900">{totalConversations}</div>
               <div className="text-xs text-gray-500">Total</div>
             </div>
             <div className="text-center">
-              <div className="text-lg font-semibold text-green-600">87.2</div>
+              <div className="text-lg font-semibold text-green-600">{avgScore.toFixed(1)}</div>
               <div className="text-xs text-gray-500">Avg Score</div>
             </div>
             <div className="text-center">
-              <div className="text-lg font-semibold text-red-600">12</div>
+              <div className="text-lg font-semibold text-red-600">{riskyConversations}</div>
               <div className="text-xs text-gray-500">Riesgos</div>
             </div>
           </div>
@@ -112,7 +107,7 @@ const QualityAssurance: React.FC = () => {
 
         {/* Conversation List */}
         <div className="flex-1 overflow-y-auto">
-          {conversations.map((conversation) => (
+          {conversationData.map((conversation) => (
             <div
               key={conversation.id}
               onClick={() => setSelectedConversation(conversation.id)}
@@ -128,7 +123,7 @@ const QualityAssurance: React.FC = () => {
                   <span className="text-sm font-medium text-gray-900">{conversation.client}</span>
                 </div>
                 <span className={`px-2 py-1 text-xs font-medium rounded-full ${getUrgencyColor(conversation.urgency)}`}>
-                  {conversation.urgency}
+                  {conversation.urgency.charAt(0).toUpperCase() + conversation.urgency.slice(1)}
                 </span>
               </div>
               
@@ -140,7 +135,7 @@ const QualityAssurance: React.FC = () => {
                 <div className="text-sm text-gray-700 font-medium">{conversation.intent}</div>
                 <div className="text-xs text-gray-500">{conversation.date}</div>
                 
-                {conversation.risks.length > 1 || conversation.risks[0] !== 'None' ? (
+                {conversation.risks.length > 0 && !conversation.risks.includes('None') ? (
                   <div className="flex items-center space-x-1 mt-2">
                     <AlertCircle className="h-3 w-3 text-red-500" />
                     <span className="text-xs text-red-600">Requiere atención</span>
@@ -154,6 +149,11 @@ const QualityAssurance: React.FC = () => {
               </div>
             </div>
           ))}
+          {conversationData.length === 0 && (
+            <div className="flex items-center justify-center h-32">
+              <p className="text-gray-500">No hay conversaciones con QA disponibles</p>
+            </div>
+          )}
         </div>
       </div>
 
@@ -225,12 +225,11 @@ const QualityAssurance: React.FC = () => {
 
                   {/* Individual Scores */}
                   <div className="space-y-3">
-                    {[
-                      { name: 'Comprensión', score: 90 },
-                      { name: 'Resolución', score: 85 },
-                      { name: 'Tono', score: 95 },
-                      { name: 'Cumplimiento', score: 80 },
-                      { name: 'Escalado', score: 70 }
+                    {selectedConv?.qa_score && [
+                      { name: 'Comprensión', score: selectedConv.qa_score.comprehension_score },
+                      { name: 'Resolución', score: selectedConv.qa_score.resolution_score },
+                      { name: 'Tono', score: selectedConv.qa_score.tone_score },
+                      { name: 'Cumplimiento', score: selectedConv.qa_score.compliance_score }
                     ].map((metric) => (
                       <div key={metric.name}>
                         <div className="flex justify-between text-sm mb-1">
@@ -253,7 +252,7 @@ const QualityAssurance: React.FC = () => {
                   </div>
 
                   {/* Risks */}
-                  {selectedConv.risks[0] !== 'None' && (
+                  {selectedConv && selectedConv.risks.length > 0 && !selectedConv.risks.includes('None') && (
                     <div className="pt-4 border-t border-gray-100">
                       <h5 className="text-sm font-medium text-gray-900 mb-2">Riesgos Detectados</h5>
                       <div className="space-y-2">
@@ -268,14 +267,18 @@ const QualityAssurance: React.FC = () => {
                   )}
 
                   {/* Actions */}
-                  <div className="pt-4 border-t border-gray-100">
-                    <button className="w-full px-4 py-2 text-sm text-red-600 border border-red-300 rounded-lg hover:bg-red-50 mb-2">
-                      Escalar a Humano
-                    </button>
-                    <button className="w-full px-4 py-2 text-sm text-blue-600 border border-blue-300 rounded-lg hover:bg-blue-50">
-                      Marcar como Revisado
-                    </button>
-                  </div>
+                  {selectedConv && (
+                    <div className="pt-4 border-t border-gray-100">
+                      {selectedConv.qa_score?.escalation_needed && (
+                        <button className="w-full px-4 py-2 text-sm text-red-600 border border-red-300 rounded-lg hover:bg-red-50 mb-2">
+                          Escalar a Humano
+                        </button>
+                      )}
+                      <button className="w-full px-4 py-2 text-sm text-blue-600 border border-blue-300 rounded-lg hover:bg-blue-50">
+                        {selectedConv.qa_score?.human_reviewed ? 'Revisado' : 'Marcar como Revisado'}
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
             </div>

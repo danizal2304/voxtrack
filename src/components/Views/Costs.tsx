@@ -1,56 +1,47 @@
 import React, { useState } from 'react';
 import { Filter, Download, Calendar, DollarSign } from 'lucide-react';
+import { useUsageEvents } from '../../hooks/useUsageEvents';
 
 const Costs: React.FC = () => {
   const [activeTab, setActiveTab] = useState('client');
   const [showFilters, setShowFilters] = useState(false);
+  const { usageEvents, loading } = useUsageEvents();
 
-  const costData = [
-    {
-      id: 1,
-      date: '2025-01-15',
-      client: 'TechCorp',
-      agent: 'Sales Assistant',
-      provider: 'Vapi',
-      metric: 'Minutos',
-      quantity: 45,
-      cost: '$23.50',
-      status: 'ok'
-    },
-    {
-      id: 2,
-      date: '2025-01-15',
-      client: 'Real Estate Pro',
-      agent: 'Lead Qualifier',
-      provider: 'Retell',
-      metric: 'Minutos',
-      quantity: 67,
-      cost: '$41.20',
-      status: 'warning'
-    },
-    {
-      id: 3,
-      date: '2025-01-14',
-      client: 'MedClinic',
-      agent: 'Appointment Setter',
-      provider: 'ElevenLabs',
-      metric: 'Characters',
-      quantity: 12500,
-      cost: '$8.75',
-      status: 'ok'
-    },
-    {
-      id: 4,
-      date: '2025-01-14',
-      client: 'RetailPlus',
-      agent: 'Support Bot',
-      provider: 'Synthflow',
-      metric: 'Llamadas',
-      quantity: 23,
-      cost: '$34.50',
-      status: 'alert'
-    }
-  ];
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-gray-500">Cargando datos de costos...</div>
+      </div>
+    );
+  }
+
+  // Calculate summary metrics from database
+  const totalMonthCost = usageEvents.reduce((sum, event) => sum + event.call_cost, 0);
+  const last7DaysCost = usageEvents
+    .filter(event => {
+      const eventDate = new Date(event.call_started_at);
+      const sevenDaysAgo = new Date();
+      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+      return eventDate >= sevenDaysAgo;
+    })
+    .reduce((sum, event) => sum + event.call_cost, 0);
+  
+  const avgDailyCost = last7DaysCost / 7;
+  const projectedMonthCost = avgDailyCost * 30;
+
+  // Transform database data for table display
+  const costData = usageEvents.map(event => ({
+    id: event.id,
+    date: new Date(event.call_started_at).toLocaleDateString('es-ES'),
+    client: event.client_name,
+    agent: event.agent_id,
+    provider: event.provider.charAt(0).toUpperCase() + event.provider.slice(1),
+    metric: 'Minutos',
+    quantity: Math.round(event.call_duration_seconds / 60),
+    cost: `$${event.call_cost.toFixed(2)}`,
+    status: event.call_cost > 50 ? 'alert' : event.call_cost > 25 ? 'warning' : 'ok'
+  }));
+
 
   const tabs = [
     { key: 'client', label: 'Por Cliente' },
@@ -86,7 +77,7 @@ const Costs: React.FC = () => {
             <DollarSign className="h-5 w-5 text-blue-600" />
             <div>
               <p className="text-sm text-gray-600">Total Mes</p>
-              <p className="text-xl font-semibold text-gray-900">$2,847</p>
+              <p className="text-xl font-semibold text-gray-900">${totalMonthCost.toFixed(2)}</p>
             </div>
           </div>
         </div>
@@ -95,20 +86,20 @@ const Costs: React.FC = () => {
             <Calendar className="h-5 w-5 text-green-600" />
             <div>
               <p className="text-sm text-gray-600">Últimos 7 días</p>
-              <p className="text-xl font-semibold text-gray-900">$487</p>
+              <p className="text-xl font-semibold text-gray-900">${last7DaysCost.toFixed(2)}</p>
             </div>
           </div>
         </div>
         <div className="bg-white rounded-lg border border-gray-200 p-4">
           <div>
             <p className="text-sm text-gray-600">Promedio diario</p>
-            <p className="text-xl font-semibold text-gray-900">$94.90</p>
+            <p className="text-xl font-semibold text-gray-900">${avgDailyCost.toFixed(2)}</p>
           </div>
         </div>
         <div className="bg-white rounded-lg border border-gray-200 p-4">
           <div>
             <p className="text-sm text-gray-600">Proyección mes</p>
-            <p className="text-xl font-semibold text-gray-900">$3,420</p>
+            <p className="text-xl font-semibold text-gray-900">${projectedMonthCost.toFixed(2)}</p>
           </div>
         </div>
       </div>
@@ -168,14 +159,17 @@ const Costs: React.FC = () => {
                   <option value="vapi">Vapi</option>
                   <option value="retell">Retell</option>
                   <option value="elevenlabs">ElevenLabs</option>
+                  <option value="synthflow">Synthflow</option>
+                  <option value="bland">Bland</option>
                 </select>
               </div>
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">Cliente</label>
                 <select className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent">
                   <option value="">Todos</option>
-                  <option value="techcorp">TechCorp</option>
-                  <option value="realestate">Real Estate Pro</option>
+                  {Array.from(new Set(usageEvents.map(e => e.client_name))).map(client => (
+                    <option key={client} value={client}>{client}</option>
+                  ))}
                 </select>
               </div>
               <div>
@@ -237,6 +231,13 @@ const Costs: React.FC = () => {
                   </td>
                 </tr>
               ))}
+              {costData.length === 0 && (
+                <tr>
+                  <td colSpan={8} className="px-6 py-8 text-center text-gray-500">
+                    No hay datos de costos disponibles
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
@@ -244,15 +245,13 @@ const Costs: React.FC = () => {
         {/* Pagination */}
         <div className="px-6 py-4 border-t border-gray-200 flex items-center justify-between">
           <div className="text-sm text-gray-500">
-            Mostrando 1-4 de 247 registros
+            Mostrando 1-{costData.length} de {costData.length} registros
           </div>
           <div className="flex items-center space-x-2">
             <button className="px-3 py-2 text-sm text-gray-500 bg-white border border-gray-300 rounded-lg hover:bg-gray-50">
               Anterior
             </button>
             <span className="px-3 py-2 text-sm bg-blue-600 text-white rounded-lg">1</span>
-            <span className="px-3 py-2 text-sm text-gray-500 hover:bg-gray-50 rounded-lg cursor-pointer">2</span>
-            <span className="px-3 py-2 text-sm text-gray-500 hover:bg-gray-50 rounded-lg cursor-pointer">3</span>
             <button className="px-3 py-2 text-sm text-gray-500 bg-white border border-gray-300 rounded-lg hover:bg-gray-50">
               Siguiente
             </button>

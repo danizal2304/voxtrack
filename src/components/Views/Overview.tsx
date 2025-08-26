@@ -1,12 +1,40 @@
 import React from 'react';
 import { DollarSign, Phone, Star, Users, TrendingUp, AlertTriangle } from 'lucide-react';
 import KPICard from '../Dashboard/KPICard';
+import { useUsageEvents } from '../../hooks/useUsageEvents';
+import { useQAScores } from '../../hooks/useQAScores';
 
 const Overview: React.FC = () => {
+  const { usageEvents, loading: usageLoading } = useUsageEvents();
+  const { conversations, loading: qaLoading } = useQAScores();
+
+  if (usageLoading || qaLoading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-gray-500">Cargando datos...</div>
+      </div>
+    );
+  }
+
+  // Calculate KPIs from database data
+  const totalCost = usageEvents.reduce((sum, event) => sum + event.call_cost, 0);
+  const totalCalls = usageEvents.length;
+  const avgQAScore = conversations.length > 0 
+    ? conversations
+        .filter(c => c.qa_score)
+        .reduce((sum, c) => sum + (c.qa_score?.overall_score || 0), 0) / 
+      conversations.filter(c => c.qa_score).length
+    : 0;
+  const totalLeads = conversations.filter(c => 
+    c.qa_score?.conversation_intent?.toLowerCase().includes('lead') ||
+    c.qa_score?.conversation_intent?.toLowerCase().includes('demo') ||
+    c.qa_score?.conversation_intent?.toLowerCase().includes('inquiry')
+  ).length;
+
   const kpis = [
     {
       title: 'Gasto del Mes',
-      value: '$2,847',
+      value: `$${totalCost.toFixed(2)}`,
       change: '+12%',
       changeType: 'negative' as const,
       icon: DollarSign,
@@ -14,7 +42,7 @@ const Overview: React.FC = () => {
     },
     {
       title: 'Llamadas Totales',
-      value: '1,245',
+      value: totalCalls.toString(),
       change: '+8%',
       changeType: 'positive' as const,
       icon: Phone,
@@ -22,7 +50,7 @@ const Overview: React.FC = () => {
     },
     {
       title: 'QA Score Promedio',
-      value: '87/100',
+      value: `${Math.round(avgQAScore)}/100`,
       change: '+3pts',
       changeType: 'positive' as const,
       icon: Star,
@@ -30,7 +58,7 @@ const Overview: React.FC = () => {
     },
     {
       title: 'Leads Generados',
-      value: '324',
+      value: totalLeads.toString(),
       change: '+15%',
       changeType: 'positive' as const,
       icon: Users,
@@ -38,19 +66,61 @@ const Overview: React.FC = () => {
     }
   ];
 
-  const alerts = [
-    { type: 'warning', message: 'Cliente "Real Estate Pro" superó el 80% del presupuesto mensual', time: '2 min' },
-    { type: 'error', message: 'Agente "Support Bot" tiene QA score bajo (65/100)', time: '15 min' },
-    { type: 'info', message: 'Nueva integración con Retell disponible', time: '1h' }
-  ];
+  // Generate alerts from database data
+  const alerts = [];
+  
+  // High cost alerts
+  const highCostClients = usageEvents
+    .reduce((acc, event) => {
+      acc[event.client_name] = (acc[event.client_name] || 0) + event.call_cost;
+      return acc;
+    }, {} as Record<string, number>);
+  
+  Object.entries(highCostClients).forEach(([client, cost]) => {
+    if (cost > 100) {
+      alerts.push({
+        type: 'warning',
+        message: `Cliente "${client}" ha gastado $${cost.toFixed(2)} este mes`,
+        time: '2 min'
+      });
+    }
+  });
 
-  const topAgents = [
-    { name: 'Sales Assistant', client: 'TechCorp', cost: '$420', calls: 89 },
-    { name: 'Support Bot', client: 'RetailPlus', cost: '$380', calls: 156 },
-    { name: 'Lead Qualifier', client: 'Real Estate Pro', cost: '$340', calls: 78 },
-    { name: 'Appointment Setter', client: 'MedClinic', cost: '$290', calls: 112 },
-    { name: 'Order Assistant', client: 'FoodDelivery', cost: '$275', calls: 203 }
-  ];
+  // Low QA score alerts
+  conversations
+    .filter(c => c.qa_score && c.qa_score.overall_score < 70)
+    .slice(0, 2)
+    .forEach(c => {
+      alerts.push({
+        type: 'error',
+        message: `Agente "${c.agent_id}" tiene QA score bajo (${c.qa_score?.overall_score}/100)`,
+        time: '15 min'
+      });
+    });
+
+  // Calculate top agents from database
+  const agentStats = usageEvents.reduce((acc, event) => {
+    const key = `${event.agent_id}-${event.client_name}`;
+    if (!acc[key]) {
+      acc[key] = {
+        name: event.agent_id,
+        client: event.client_name,
+        cost: 0,
+        calls: 0
+      };
+    }
+    acc[key].cost += event.call_cost;
+    acc[key].calls += 1;
+    return acc;
+  }, {} as Record<string, { name: string; client: string; cost: number; calls: number }>);
+
+  const topAgents = Object.values(agentStats)
+    .sort((a, b) => b.cost - a.cost)
+    .slice(0, 5)
+    .map(agent => ({
+      ...agent,
+      cost: `$${agent.cost.toFixed(2)}`
+    }));
 
   return (
     <div className="space-y-6">
@@ -108,6 +178,11 @@ const Overview: React.FC = () => {
                 </div>
               </div>
             ))}
+            {alerts.length === 0 && (
+              <div className="text-center py-4">
+                <p className="text-sm text-gray-500">No hay alertas activas</p>
+              </div>
+            )}
           </div>
           
           <button className="w-full mt-4 text-sm text-blue-600 hover:text-blue-700 font-medium">
@@ -144,6 +219,13 @@ const Overview: React.FC = () => {
                   <td className="py-4 px-4 text-right font-semibold text-gray-900">{agent.cost}</td>
                 </tr>
               ))}
+              {topAgents.length === 0 && (
+                <tr>
+                  <td colSpan={4} className="py-8 text-center text-gray-500">
+                    No hay datos de agentes disponibles
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
